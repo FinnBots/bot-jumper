@@ -529,11 +529,20 @@ if(!HEADLESS){
     // platforms + oil cans
     for(let i=Math.max(0,s.height-3); i<=s.genIdx; i++){ const g=s.plats[i]; if(!g) continue;
       const y=toY(g.y); if(y<-24||y>VIEW.h+24) continue;
+      // volcanic ledge — outline + lit top + shadow + pebbles
+      ctx.fillStyle='#120a08'; ctx.fillRect(g.x-1,y-1,g.w+2,13);
       ctx.fillStyle='#5a4636'; ctx.fillRect(g.x,y,g.w,11);
-      ctx.fillStyle='#6f5844'; ctx.fillRect(g.x,y,g.w,3);
+      ctx.fillStyle='#7a6046'; ctx.fillRect(g.x,y,g.w,3);
+      ctx.fillStyle='#3a2b20'; ctx.fillRect(g.x,y+9,g.w,2);
+      ctx.fillStyle='#8a6a4a'; for(let k=4;k<g.w-3;k+=9){ ctx.fillRect(g.x+k,y+5,2,2); }
       if(g.oil && !g.got){ const ox=g.x+g.w/2;
-        ctx.fillStyle=CFG.danger; ctx.fillRect(ox-9,y-20,18,18);
-        ctx.fillStyle='#3e2a10'; ctx.fillRect(ox-6,y-16,12,4); }
+        ctx.fillStyle='#120a08'; ctx.fillRect(ox-8,y-21,16,20);        // outline
+        ctx.fillStyle=CFG.danger; ctx.fillRect(ox-7,y-20,14,18);       // body
+        ctx.fillStyle='#ffce7a'; ctx.fillRect(ox-7,y-20,14,3);         // top highlight
+        ctx.fillStyle='#a85a1e'; ctx.fillRect(ox-7,y-5,14,3);          // bottom shadow
+        ctx.fillStyle='#3e2a10'; ctx.fillRect(ox-4,y-14,8,7);          // label plate
+        ctx.fillStyle='#ffce7a'; ctx.fillRect(ox-3,y-12,2,4); ctx.fillRect(ox,y-12,2,4); ctx.fillRect(ox+3,y-12,1,4);
+        ctx.fillStyle='#5a4636'; ctx.fillRect(ox-2,y-24,4,3); }        // cap
     }
 
     if(!reduce) for(const p of s.parts){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle=CFG.danger; ctx.fillRect(p.x-2,toY(p.y)-2,4,4); }
