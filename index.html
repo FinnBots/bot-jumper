@@ -523,8 +523,13 @@ if(!HEADLESS){
     const want=s.bot.y - VIEW.h*0.58; camTop += (want-camTop)*0.25;
     const toY=(wy)=>wy-camTop;
 
-    ctx.fillStyle='#20150f'; ctx.fillRect(0,0,VIEW.w,VIEW.h);
+    // volcano ambient — cool dark top fading to warm ember dark at the base
+    const bg=ctx.createLinearGradient(0,0,0,VIEW.h);
+    bg.addColorStop(0,'#1a1220'); bg.addColorStop(0.7,'#241611'); bg.addColorStop(1,'#3a1c10');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,VIEW.w,VIEW.h);
+    // rocky side walls with scrolling speckle (parallax to the climb)
     ctx.fillStyle='#2b1d15'; ctx.fillRect(0,0,8,VIEW.h); ctx.fillRect(VIEW.w-8,0,8,VIEW.h);
+    ctx.fillStyle='#3a2a1e'; for(let ry=(-camTop%18+18)%18; ry<VIEW.h; ry+=18){ ctx.fillRect(2,ry,3,2); ctx.fillRect(VIEW.w-5,ry+9,3,2); }
 
     // platforms + oil cans
     for(let i=Math.max(0,s.height-3); i<=s.genIdx; i++){ const g=s.plats[i]; if(!g) continue;
