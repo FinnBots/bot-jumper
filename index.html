@@ -91,6 +91,7 @@
   .life{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:var(--sh1)}
   .life.off{background:rgba(0,0,0,.14);box-shadow:none}
 
+  /* Controls (steer only — Doodle-Jump auto-bounce) */
   .controls{display:flex;gap:var(--s2);background:rgba(255,255,255,.55);
             border-radius:var(--r-md);padding:6px var(--s3);box-shadow:var(--sh1)}
   .ctl{flex:1;appearance:none;border:0;cursor:pointer;font-family:var(--disp);font-size:22px;
@@ -219,7 +220,7 @@ body:not(.mode-paid) .facts{display:none!important}
       <div class="tag">a FinnBots game</div>
       <div class="links">
         <a href="https://magiceden.io/marketplace/finnbot" target="_blank" rel="noopener">Buy a Bot</a>·
-        <a href="https://games.finnstergram.com/" target="_blank" rel="noopener">More games</a>·
+        <a href="https://finnstergram.com/games" target="_blank" rel="noopener">More games</a>·
         <a href="https://jump.finnstergram.com/leaderboard.html" target="_blank" rel="noopener">Leaderboard</a>
       </div>
     </footer>
@@ -232,6 +233,7 @@ body:not(.mode-paid) .facts{display:none!important}
       <ul class="rules">
         <li><b>◀ ▶</b> (or ← →, or tilt your phone) to steer — 106 <b>bounces on his own</b>.</li>
         <li>Land on the ledges to climb. Off the sides you <b>wrap around</b>.</li>
+        <li><b>Combo:</b> chain jumps that clear <b>2+ ledges</b> — a combo spanning 4 ledges or more pays a bonus of <b>ledges &times; ledges</b>.</li>
         <li>Grab an <b>oil can</b> to refill the meter — a full meter means a high bounce.</li>
         <li>Let the meter run down and 106 bounces short, so the <b>rising lava</b> gains — and it climbs faster the higher you go.</li>
         <li>Three lava touches ends the run. Climb as <b>high</b> as you can.</li>
@@ -324,6 +326,10 @@ const LAVA = { startDelayMs:3000, baseRise:16, accelPerLevel:0.45, knockbackLeve
 
 /* ---- SCORE (higher = better; scanner applies holder x1.5 to `score`) ------ */
 const SCORE = { heightPts:10, oilPts:15 };
+/* ---- COMBO (Icy Tower rule): every landing that clears >=2 floors extends the
+   combo; a 1-floor hop, a fall, or ~3s without a jump ends it. A COMPLETED combo
+   that spanned >=4 floors pays a bonus equal to (floors)^2. ------------------ */
+const COMBO = { minStep:2, minFloors:4, timeoutMs:3000 };
 
 /* ---- deterministic RNG (everyone climbs the same volcano) ----------------- */
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a);
@@ -352,6 +358,7 @@ function newRun(){
     inLeft:false, inRight:false, tilt:0,
     meter:1, lives:COURSE.lives, oil:0, height:0, score:0,
     lavaY:COURSE.startY+120, lavaOnAt:LAVA.startDelayMs, timeMs:0, parts:[],
+    lastLv:0, comboFloors:0, comboT:0, comboPts:0, bestCombo:0,
   };
   // wide, centred start platform at index 0
   s.plats[0]={ i:0, x:(VIEW.w-VIEW.w*0.5)/2, y:COURSE.startY, w:VIEW.w*0.5, oil:false, got:false };
@@ -363,7 +370,16 @@ function newRun(){
 }
 
 function bouncePow(s){ return BOUNCE.minPow + (1-BOUNCE.minPow)*s.meter; }
-function computeScore(s){ return SCORE.heightPts*s.height + SCORE.oilPts*s.oil; }
+function computeScore(s){ return SCORE.heightPts*s.height + SCORE.oilPts*s.oil + s.comboPts; }
+/* close the running combo; a combo of >=4 floors banks floors^2 (arcade Icy Tower) */
+function endCombo(s, ev, award){
+  if(award && s.comboFloors>=COMBO.minFloors){
+    s.comboPts += s.comboFloors*s.comboFloors;
+    if(s.comboFloors>s.bestCombo) s.bestCombo=s.comboFloors;
+    if(ev){ ev.combo=s.comboFloors; }
+  }
+  s.comboFloors=0; s.comboT=0;
+}
 function steerDir(s){ let d=0; if(s.inLeft)d-=1; if(s.inRight)d+=1; if(Math.abs(s.tilt)>0.08)d=s.tilt; return Math.max(-1,Math.min(1,d)); }
 
 /* input helper (mutate state) ---------------------------------------------- */
@@ -374,6 +390,9 @@ function stepJump(s, dtMs){
   const ev={ bounce:false, oil:false, life:false, over:false };
   if(s.phase==='dead') return ev;
   const dt=dtMs/1000; s.timeMs+=dtMs;
+
+  // combo clock: >~3s without a qualifying landing closes the combo
+  if(s.comboFloors>0){ s.comboT+=dtMs; if(s.comboT>=COMBO.timeoutMs) endCombo(s,ev,true); }
 
   // lava + meter
   if(s.timeMs>=s.lavaOnAt){ s.lavaY -= (LAVA.baseRise + LAVA.accelPerLevel*s.height)*dt; }
@@ -405,6 +424,10 @@ function stepJump(s, dtMs){
       const within=(px)=> (cx>=px-4 && cx<=px+g.w+4);
       if(prevFeet<=g.y+2 && feet>=g.y && (within(g.x)||within(g.x-VIEW.w)||within(g.x+VIEW.w))){
         b.y=g.y-BH; b.vy=-BOUNCE.v*bouncePow(s); b.lv=Math.max(b.lv,i); ev.bounce=true;
+        // combo: floors gained by THIS jump
+        const gained=i-s.lastLv; s.lastLv=i;
+        if(gained>=COMBO.minStep){ s.comboFloors+=gained; s.comboT=0; }
+        else endCombo(s,ev,true);            // 1-floor hop or a drop closes it
         if(i>s.height) s.height=i;
         if(g.oil && !g.got){ g.got=true; s.oil++; s.meter=Math.max(0,Math.min(1,s.meter+METER.refill)); ev.oil=true;
           for(let k=0;k<8;k++) s.parts.push({ x:g.x+g.w/2, y:g.y-10, vx:(Math.random()-0.5)*120, vy:-Math.random()*160, t:0.5 }); }
@@ -415,13 +438,14 @@ function stepJump(s, dtMs){
 
   // lava catch => lose a life
   if(b.y+BH>=s.lavaY-2){
+    endCombo(s,ev,false);                    // caught by the lava: combo lost, no bonus
     s.lives--; ev.life=true;
     if(s.lives<=0){ s.phase='dead'; s.score=computeScore(s); ev.over=true; return ev; }
     s.lavaY += LAVA.knockbackLevels*COURSE.vGap;
     // respawn on the lowest platform still safely above the lava
     let safe=s.plats[s.height]||s.plats[0];
     for(let i=0;i<=s.genIdx;i++){ const g=s.plats[i]; if(g && g.y < s.lavaY-40){ safe=g; break; } }
-    b.x=safe.x+safe.w/2-BW/2; b.y=safe.y-BH; b.vx=0; b.vy=-BOUNCE.v*bouncePow(s); b.lv=safe.i;
+    b.x=safe.x+safe.w/2-BW/2; b.y=safe.y-BH; b.vx=0; b.vy=-BOUNCE.v*bouncePow(s); b.lv=safe.i; s.lastLv=safe.i;
   }
 
   // sparks
@@ -446,12 +470,12 @@ if(!HEADLESS){
   ctx.imageSmoothingEnabled=false;
   const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // Bot 106 sprite (drawn inside the ball); numbered-swatch fallback
+  // hero sprite: real Bot 106 with numbered-swatch fallback (FDL rule)
   const hero=new Image(); let heroOK=false;
   hero.crossOrigin='anonymous';
   hero.onload=()=>{heroOK=true;};
   hero.onerror=()=>{heroOK=false;};
-  hero.src='assets/hero/bot-106.png';   // keyed transparent 106 (no cyan box)
+  if(CFG.spriteBase && CFG.spriteBase.indexOf('REPLACE_')!==0){ hero.src=CFG.spriteBase+'/'+CFG.hero+'.png'; }
 
   let s=newRun();
   let flash=0, camTop=s.bot.y - VIEW.h*0.58;
@@ -536,35 +560,22 @@ if(!HEADLESS){
   }
 
   // ---- render ------------------------------------------------------------
+  let comboMsg='', comboT=0;
   function draw(){
     const want=s.bot.y - VIEW.h*0.58; camTop += (want-camTop)*0.25;
     const toY=(wy)=>wy-camTop;
 
-    // volcano ambient — cool dark top fading to warm ember dark at the base
-    const bg=ctx.createLinearGradient(0,0,0,VIEW.h);
-    bg.addColorStop(0,'#1a1220'); bg.addColorStop(0.7,'#241611'); bg.addColorStop(1,'#3a1c10');
-    ctx.fillStyle=bg; ctx.fillRect(0,0,VIEW.w,VIEW.h);
-    // rocky side walls with scrolling speckle (parallax to the climb)
+    ctx.fillStyle='#20150f'; ctx.fillRect(0,0,VIEW.w,VIEW.h);
     ctx.fillStyle='#2b1d15'; ctx.fillRect(0,0,8,VIEW.h); ctx.fillRect(VIEW.w-8,0,8,VIEW.h);
-    ctx.fillStyle='#3a2a1e'; for(let ry=(-camTop%18+18)%18; ry<VIEW.h; ry+=18){ ctx.fillRect(2,ry,3,2); ctx.fillRect(VIEW.w-5,ry+9,3,2); }
 
     // platforms + oil cans
     for(let i=Math.max(0,s.height-3); i<=s.genIdx; i++){ const g=s.plats[i]; if(!g) continue;
       const y=toY(g.y); if(y<-24||y>VIEW.h+24) continue;
-      // volcanic ledge — outline + lit top + shadow + pebbles
-      ctx.fillStyle='#120a08'; ctx.fillRect(g.x-1,y-1,g.w+2,13);
       ctx.fillStyle='#5a4636'; ctx.fillRect(g.x,y,g.w,11);
-      ctx.fillStyle='#7a6046'; ctx.fillRect(g.x,y,g.w,3);
-      ctx.fillStyle='#3a2b20'; ctx.fillRect(g.x,y+9,g.w,2);
-      ctx.fillStyle='#8a6a4a'; for(let k=4;k<g.w-3;k+=9){ ctx.fillRect(g.x+k,y+5,2,2); }
+      ctx.fillStyle='#6f5844'; ctx.fillRect(g.x,y,g.w,3);
       if(g.oil && !g.got){ const ox=g.x+g.w/2;
-        ctx.fillStyle='#120a08'; ctx.fillRect(ox-8,y-21,16,20);        // outline
-        ctx.fillStyle=CFG.danger; ctx.fillRect(ox-7,y-20,14,18);       // body
-        ctx.fillStyle='#ffce7a'; ctx.fillRect(ox-7,y-20,14,3);         // top highlight
-        ctx.fillStyle='#a85a1e'; ctx.fillRect(ox-7,y-5,14,3);          // bottom shadow
-        ctx.fillStyle='#3e2a10'; ctx.fillRect(ox-4,y-14,8,7);          // label plate
-        ctx.fillStyle='#ffce7a'; ctx.fillRect(ox-3,y-12,2,4); ctx.fillRect(ox,y-12,2,4); ctx.fillRect(ox+3,y-12,1,4);
-        ctx.fillStyle='#5a4636'; ctx.fillRect(ox-2,y-24,4,3); }        // cap
+        ctx.fillStyle=CFG.danger; ctx.fillRect(ox-9,y-20,18,18);
+        ctx.fillStyle='#3e2a10'; ctx.fillRect(ox-6,y-16,12,4); }
     }
 
     if(!reduce) for(const p of s.parts){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle=CFG.danger; ctx.fillRect(p.x-2,toY(p.y)-2,4,4); }
@@ -572,19 +583,12 @@ if(!HEADLESS){
 
     // bot = Bot 106 (with a wrap ghost when crossing an edge)
     const b=s.bot, bx=b.x, by=toY(b.y), BW=COURSE.botW, BH=COURSE.botH;
-    function drawBot(px){ const cx=px+BW/2, cy=by+BH/2, r=BW/2;
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle=CFG.accent; ctx.fill();
-      ctx.clip();                                   // keep Bot 106 inside the circle
-      if(heroOK){
+    function drawBot(px){ if(heroOK){ ctx.save();
         if(b.face<0){ ctx.translate(px+BW,by); ctx.scale(-1,1); ctx.drawImage(hero,0,0,BW,BH); }
-        else ctx.drawImage(hero,px,by,BW,BH);
-      } else {
-        ctx.fillStyle='#fff'; ctx.font='11px "Jersey 15", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('106', cx, cy);
-      }
-      ctx.restore();
-      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.lineWidth=2; ctx.strokeStyle='#22314f'; ctx.stroke(); }
+        else ctx.drawImage(hero,px,by,BW,BH); ctx.restore();
+      }else{ ctx.fillStyle=CFG.accent; ctx.fillRect(px,by,BW,BH);
+        ctx.fillStyle='#fff'; ctx.font='10px "Jersey 15", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('106', px+BW/2, by+BH/2); } }
     drawBot(bx);
     if(bx<0) drawBot(bx+VIEW.w); else if(bx+BW>VIEW.w) drawBot(bx-VIEW.w);
 
@@ -595,6 +599,14 @@ if(!HEADLESS){
       grd.addColorStop(0,'#ffb347'); grd.addColorStop(0.3,CFG.danger); grd.addColorStop(1,'#c23b12');
       ctx.fillStyle=grd; ctx.fillRect(0,ly,VIEW.w,VIEW.h-ly);
       ctx.fillStyle='rgba(255,220,150,.55)'; ctx.fillRect(0,ly,VIEW.w,3);
+    }
+
+    // combo banner (Icy Tower: a completed >=4-floor combo pays floors^2)
+    if(comboT>0){
+      ctx.save(); ctx.globalAlpha=Math.min(1,comboT/400);
+      ctx.fillStyle='#ffd27f'; ctx.font='20px "Jersey 15", monospace';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(comboMsg, VIEW.w/2, VIEW.h*0.28); ctx.restore();
     }
 
     // agility bar (top-left)
@@ -623,12 +635,14 @@ if(!HEADLESS){
   // ---- loop --------------------------------------------------------------
   let last=performance.now(), acc=0; const FIXED=1000/120;
   function frame(now){
+      if(comboT>0) comboT-=16;
     let dt=now-last; last=now; if(dt>100)dt=100; acc+=dt;
     if(active){
       while(acc>=FIXED){
         const deadBefore=(s.phase==='dead');
         const ev=stepJump(s, FIXED);
         if(ev.life||ev.over) flash=1;
+        if(ev.combo){ blip('oil'); comboMsg='COMBO '+ev.combo+'  +'+(ev.combo*ev.combo); comboT=1200; }
         if(ev.oil) blip('oil'); else if(ev.bounce) blip('bounce');
         acc-=FIXED;
         if(ev.over && !deadBefore){ blip('over'); endRun(); break; }
@@ -642,8 +656,6 @@ if(!HEADLESS){
 })();
 }
 
-/* Auto-open the How-To as an intro on first load (skip Phantom redirect returns). */
-try{var _bpIntro=new URLSearchParams(location.search);if(!_bpIntro.get('phantom_action')&&_bpIntro.get('src')!=='browse'){addEventListener('load',function(){var b=document.getElementById('infoBtn');if(b)b.click();});}}catch(e){}
 </script>
 
 <!-- Shared wallet libs (loaded once; the wallet LOGIC stays dead until Paid is chosen — mirrors live Mr Bot / Rush). -->
