@@ -616,7 +616,7 @@ const LAVA = { startDelayMs:3000, baseRise:16, accelPerLevel:0.45, knockbackLeve
 
 /* ---- SCORE (higher = better; scanner applies holder x1.5 to `score`) ------ */
 const SCORE = { heightPts:10, oilPts:15 };
-/* ---- COMBO (Icy Tower rule): every landing that clears >=2 floors extends the
+/* ---- COMBO (the endless tower-jump original rule): every landing that clears >=2 floors extends the
    combo; a 1-floor hop, a fall, or ~3s without a jump ends it. A COMPLETED combo
    that spanned >=4 floors pays a bonus equal to (floors)^2. ------------------ */
 const COMBO = { minStep:2, minFloors:4, timeoutMs:3000 };
@@ -661,7 +661,7 @@ function newRun(){
 
 function bouncePow(s){ return BOUNCE.minPow + (1-BOUNCE.minPow)*s.meter; }
 function computeScore(s){ return SCORE.heightPts*s.height + SCORE.oilPts*s.oil + s.comboPts; }
-/* close the running combo; a combo of >=4 floors banks floors^2 (arcade Icy Tower) */
+/* close the running combo; a combo of >=4 floors banks floors^2 (arcade the endless tower-jump original) */
 function endCombo(s, ev, award){
   if(award && s.comboFloors>=COMBO.minFloors){
     s.comboPts += s.comboFloors*s.comboFloors;
@@ -895,7 +895,7 @@ if(!HEADLESS){
       ctx.fillStyle='rgba(255,220,150,.55)'; ctx.fillRect(0,ly,VIEW.w,3);
     }
 
-    // combo banner (Icy Tower: a completed >=4-floor combo pays floors^2)
+    // combo banner (the endless tower-jump original: a completed >=4-floor combo pays floors^2)
     if(comboT>0){
       ctx.save(); ctx.globalAlpha=Math.min(1,comboT/400);
       ctx.fillStyle='#ffd27f'; ctx.font='20px "Jersey 15", monospace';
