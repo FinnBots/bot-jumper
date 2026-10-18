@@ -1092,7 +1092,7 @@ body:not(.mode-paid) .app .facts{ display:block !important; }
     </div>
 
     <main class="surface">
-      <canvas id="game" width="360" height="640" aria-label="Bot Jumper play area. Bot 2969 auto-bounces up an endless erupting volcano. Steer left or right (edges wrap), grab oil to keep bouncing high, and stay ahead of the rising lava."></canvas>
+      <canvas id="game" width="360" height="640" aria-label="Bot Jumper play area. Bot 2969 auto-bounces up an endless erupting volcano. Steer left or right (edges wrap), grab $OIL to bounce high, hit springs, chain combos, and stay ahead of the rising lava."></canvas>
     </main>
 
     <div class="hud" aria-live="polite">
@@ -1123,10 +1123,11 @@ body:not(.mode-paid) .app .facts{ display:block !important; }
       <ul class="rules">
         <li><b>◀ ▶</b> (or ← →, or tilt your phone) to steer — 2969 <b>bounces on his own</b>.</li>
         <li>Land on the ledges to climb. Off the sides you <b>wrap around</b>.</li>
-        <li><b>Combo:</b> chain jumps that clear <b>2+ ledges</b> — a combo spanning 4 ledges or more pays a bonus of <b>ledges &times; ledges</b>.</li>
-        <li>Grab an <b>oil can</b> to refill the meter — a full meter means a high bounce.</li>
-        <li>Let the meter run down and 2969 bounces short, so the <b>rising lava</b> gains — and it climbs faster the higher you go.</li>
-        <li>Three lava touches ends the run. Climb as <b>high</b> as you can.</li>
+        <li>Grab <b>$OIL cans</b> to fill the gauge — a full gauge bounces you <b>over</b> a ledge.</li>
+        <li><b>Springs</b>: land right on the coil to fly ~6 ledges. <b>Hover pads</b> slide; <b>rusty plates</b> crumble after one bounce.</li>
+        <li><b>Combo:</b> keep landing <b>2+ ledges</b> up, each within 3 seconds — a combo of 4 ledges or more pays <b>ledges &times; ledges</b>.</li>
+        <li>The lava wakes at ledge 5 and climbs faster the higher you go. <b>One touch ends the run.</b></li>
+        <li>A new world every 100 ledges. Climb as <b>high</b> as you can.</li>
       </ul>
       <p class="safe">Free play never touches a wallet, never asks for a seed phrase, and never moves a Bot.</p>
       <button class="btn" id="rulesClose">Got it</button>
@@ -1149,7 +1150,7 @@ body:not(.mode-paid) .app .facts{ display:block !important; }
   <!-- Kid-safety confirm gate (shown BEFORE any wallet code runs) -->
   <div class="sheet" id="confirmSheet"><div class="panel">
     <h2>Play Bot Jumper — Paid</h2>
-    <p>One entry = one run (3 lives, no continues). Costs <b>25 OIL</b> to the treasury (a sink). Pays nothing out — you're playing for a leaderboard spot. Bot holders: score ×1.5.<br/><br/>A <b>fun ranking</b> — not verified.</p>
+    <p>One entry = one run (one life, no continues). Costs <b>25 OIL</b> to the treasury (a sink). Pays nothing out — you're playing for a leaderboard spot. Bot holders: score ×1.5.<br/><br/>A <b>fun ranking</b> — not verified.</p>
     <button class="again" id="confirmEnter" type="button">Connect &amp; Pay</button>
     <button class="ghostbtn" id="confirmBack" type="button">Cancel</button>
   </div></div>
@@ -1193,11 +1194,23 @@ const CFG = {
 const VIEW = { w:360, h:640 };
 
 /* ---- COURSE: endless, deterministic (everyone climbs the same volcano) ---- */
-const COURSE = { seed:1061, vGap:70, plW:80, maxStep:115, lives:3,
+/* ONE LIFE (Founder, 2026-10-18, at DESIGN-LOCK: "One life, like the original"). */
+const COURSE = { seed:1061, vGap:70, plW:80, maxStep:115, lives:1,
                  startY:3000, botW:26, botH:26, genAhead:16 };
 
-/* ---- BOUNCE: auto-bounce; strength scales with the agility meter ---------- */
-const BOUNCE = { v:640, minPow:0.72 };
+/* ---- BOUNCE: auto-bounce; strength scales with the agility meter ----------
+   2026-10-18: the COMBO could never fire. Apex = (v*pow)^2 / 2g, and at v 640 a FULL meter
+   peaked at 136.5 px — under the 140 px a 2-ledge jump needs (vGap 70) — so a perfect run of
+   374 ledges scored zero combos; the audit had proved the rule by FORCING landings. And an
+   EMPTY meter peaked at 70.8 px against a 70 px gap: a knife edge, not a margin. Now a full
+   meter reaches 2.33 ledges (a skipped ledge is a skill shot) and an empty one 1.24 ledges
+   (always the next one, never more). A SPRING pad throws ~6 ledges, whatever the meter. */
+const BOUNCE = { v:700, minPow:0.73, spring:1.62, springHalf:13 };
+/* ---- LEDGE KINDS: the genre's staples, phased in by height so the climb has a curve.
+   All drawn from the course RNG, so every player climbs the same tower (daily seed).
+   Fairness: never two crumbling ledges in a row, and a mover's swing stays on screen. */
+const KINDS = { springFrom:8, springGap:[8,13], moveFrom:25, moveMax:0.35, moveAmp:[26,44],
+                moveSpd:[0.9,1.8], crumbleFrom:50, crumbleMax:0.18, rampLedges:150 };
 
 /* ---- STEER: the only control (buttons / keys / tilt) ---------------------- */
 const STEER = { accel:1700, maxVX:300, friction:0.86 };
@@ -1212,7 +1225,18 @@ const METER = { drainPerSec:0.05, refill:1.0 };
 const OIL = { every:2 };
 
 /* ---- LAVA: the skill ceiling (rise accelerates with height => run ends) --- */
-const LAVA = { startDelayMs:3000, baseRise:16, accelPerLevel:0.45, knockbackLevels:6 };
+/* The lava SLEEPS until the climb is under way — the original's own opening ("the floors are
+   still until floor 5"). With one life, a lava that woke at 3 s, 120 px under the start, killed a
+   young player's run in 1-5 s. It wakes at ledge 5, or after 8 s so a no-input run still ends. */
+/* LEASH: the lava is never more than this far below your BEST ledge. Without it a decent climber
+   left it 70+ ledges behind for the first two minutes — no chase at all until the very end. */
+/* accelPerLevel CALIBRATED 2026-10-18 against a POPULATION, not one bot (one deterministic player
+   has cliffs: 0.41 -> 399, 0.42 -> 311). 10 real-engine players with seeded aim noise, first death:
+     old physics       aim +-20px: median 374 (all 374)   aim +-35px: median 137 (39 .. 374)
+     new @ 0.45        aim +-20px: ~386-390 (283 .. 394)   aim +-35px: ~290 (47 .. 391)
+   so the TOP of the height board stays within ~5% of the old ceiling, while a sloppier young player
+   now climbs ~2x further than before instead of dying at ledge 39. */
+const LAVA = { wakeLedge:5, wakeMs:8000, baseRise:16, accelPerLevel:0.45, knockbackLevels:6, leash:420 };
 
 /* ---- SCORE (higher = better; scanner applies holder x1.5 to `score`) ------ */
 const SCORE = { heightPts:10, oilPts:15 };
@@ -1230,12 +1254,28 @@ function nextCx(prevCx, rnd){
   const half=COURSE.plW/2+8;
   return Math.max(half, Math.min(VIEW.w-half, prevCx+(rnd()*2-1)*COURSE.maxStep));
 }
+function share(i,from,max){ return i<from ? 0 : max*Math.min(1,(i-from)/KINDS.rampLedges); }
 function genUpTo(s, idx){
   while(s.genIdx<idx){
     const i=++s.genIdx;
     s.genCx=nextCx(s.genCx, s.rnd);
-    s.plats[i]={ i, x:s.genCx-COURSE.plW/2, y:COURSE.startY-i*COURSE.vGap, w:COURSE.plW,
-                 oil:(i%OIL.every===0), got:false };
+    const r1=s.rnd(), r2=s.rnd(), r3=s.rnd(), prev=s.plats[i-1];
+    let kind='solid';
+    if(r1<share(i,KINDS.moveFrom,KINDS.moveMax)) kind='move';
+    else if(r1<share(i,KINDS.moveFrom,KINDS.moveMax)+share(i,KINDS.crumbleFrom,KINDS.crumbleMax)
+            && !(prev && prev.kind==='crumble')) kind='crumble';
+    const g={ i, kind, x:s.genCx-COURSE.plW/2, y:COURSE.startY-i*COURSE.vGap, w:COURSE.plW,
+              oil:(i%OIL.every===0), got:false, broken:false, spring:false };
+    if(kind==='move'){
+      const half=COURSE.plW/2;
+      g.amp=KINDS.moveAmp[0]+r2*(KINDS.moveAmp[1]-KINDS.moveAmp[0]);
+      g.cx0=Math.max(half+g.amp, Math.min(VIEW.w-half-g.amp, s.genCx));
+      g.spd=KINDS.moveSpd[0]+r3*(KINDS.moveSpd[1]-KINDS.moveSpd[0]); g.ph=r2*6.283;
+      g.x=g.cx0-half+g.amp*Math.sin(g.ph);
+    }
+    if(kind==='solid' && i>=KINDS.springFrom && i>=s.nextSpring){
+      g.spring=true; s.nextSpring=i+KINDS.springGap[0]+Math.floor(r3*(KINDS.springGap[1]-KINDS.springGap[0]+1)); }
+    s.plats[i]=g;
   }
 }
 
@@ -1247,11 +1287,12 @@ function newRun(){
     bot:{ x:0, y:0, vx:0, vy:0, lv:0, face:1 },
     inLeft:false, inRight:false, tilt:0,
     meter:1, lives:COURSE.lives, oil:0, height:0, score:0,
-    lavaY:COURSE.startY+120, lavaOnAt:LAVA.startDelayMs, timeMs:0, parts:[],
-    lastLv:0, comboFloors:0, comboT:0, comboPts:0, bestCombo:0,
+    lavaY:COURSE.startY+120, lavaAwake:false, timeMs:0, parts:[],
+    lastLv:0, comboFloors:0, comboT:0, comboPts:0, bestCombo:0, nextSpring:KINDS.springFrom,
   };
   // wide, centred start platform at index 0
-  s.plats[0]={ i:0, x:(VIEW.w-VIEW.w*0.5)/2, y:COURSE.startY, w:VIEW.w*0.5, oil:false, got:false };
+  /* ledge 0 is the volcano FLOOR, wall to wall: a fumble at the start lands you back on it */
+  s.plats[0]={ i:0, kind:'solid', x:0, y:COURSE.startY, w:VIEW.w, oil:false, got:false, broken:false, spring:false };
   s.genIdx=0; s.genCx=VIEW.w/2;
   genUpTo(s, COURSE.genAhead);
   const st=s.plats[0];
@@ -1285,7 +1326,9 @@ function stepJump(s, dtMs){
   if(s.comboFloors>0){ s.comboT+=dtMs; if(s.comboT>=COMBO.timeoutMs) endCombo(s,ev,true); }
 
   // lava + meter
-  if(s.timeMs>=s.lavaOnAt){ s.lavaY -= (LAVA.baseRise + LAVA.accelPerLevel*s.height)*dt; }
+  if(!s.lavaAwake) s.lavaAwake = (s.height>=LAVA.wakeLedge || s.timeMs>=LAVA.wakeMs);
+  if(s.lavaAwake){ s.lavaY -= (LAVA.baseRise + LAVA.accelPerLevel*s.height)*dt;
+    const best=s.plats[s.height]; if(best) s.lavaY=Math.min(s.lavaY, best.y+LAVA.leash); }
   s.meter=Math.max(0,Math.min(1,s.meter - METER.drainPerSec*dt));
 
   const b=s.bot, BW=COURSE.botW, BH=COURSE.botH;
@@ -1303,17 +1346,27 @@ function stepJump(s, dtMs){
   // wrap horizontally (screen edges)
   if(b.x+BW<0) b.x=VIEW.w; else if(b.x>VIEW.w) b.x=-BW;
 
-  // ensure platforms exist above the bot
+  // ensure platforms exist above the bot, and slide the movers
   genUpTo(s, b.lv+COURSE.genAhead);
+  for(let i=Math.max(0,b.lv-4); i<=s.genIdx; i++){ const g=s.plats[i];
+    if(g && g.kind==='move'){ g.ph+=g.spd*dt; g.x=g.cx0-COURSE.plW/2+g.amp*Math.sin(g.ph); } }
 
   // auto-bounce: land on a platform while descending -> bounce up
   if(b.vy>0){
     const feet=b.y+BH, cx=b.x+BW/2;
-    for(let i=Math.max(0,b.lv-2); i<=s.genIdx; i++){
-      const g=s.plats[i]; if(!g) continue;
+    /* a fall lands on the ledge it falls ONTO. The window used to start at lv-2, and lv is the
+       HIGHEST ledge reached, so a drop of three ledges passed through everything — the floor
+       included — into the lava. The lava is what is meant to end a run, not a missing collider. */
+    for(let i=Math.max(0,b.lv-COURSE.genAhead); i<=s.genIdx; i++){
+      const g=s.plats[i]; if(!g || g.broken) continue;
       const within=(px)=> (cx>=px-4 && cx<=px+g.w+4);
       if(prevFeet<=g.y+2 && feet>=g.y && (within(g.x)||within(g.x-VIEW.w)||within(g.x+VIEW.w))){
-        b.y=g.y-BH; b.vy=-BOUNCE.v*bouncePow(s); b.lv=Math.max(b.lv,i); ev.bounce=true;
+        /* a spring fires only when you land ON the coil — aiming for it is the skill */
+        const onCoil = g.spring && Math.abs(cx-(g.x+g.w/2))<=BOUNCE.springHalf;
+        b.y=g.y-BH; b.vy=-BOUNCE.v*(onCoil ? BOUNCE.spring : bouncePow(s)); b.lv=Math.max(b.lv,i); ev.bounce=true;
+        ev.land={ x:cx, y:g.y, kind:g.kind, spring:onCoil };
+        if(onCoil) ev.spring=true;
+        if(g.kind==='crumble'){ g.broken=true; ev.crumble=true; }   /* one bounce, then it falls away */
         // combo: floors gained by THIS jump
         const gained=i-s.lastLv; s.lastLv=i;
         if(gained>=COMBO.minStep){ s.comboFloors+=gained; s.comboT=0; }
@@ -1446,7 +1499,7 @@ if(!HEADLESS){
   // simple WebAudio blips (respect reduced-motion => silent)
   let ac=null; function blip(kind){ if(reduce) return; try{ ac=ac||new (window.AudioContext||window.webkitAudioContext)();
     const o=ac.createOscillator(), g=ac.createGain(); o.connect(g); g.connect(ac.destination);
-    const f={bounce:520,oil:760,life:180,over:150}[kind]||440;
+    const f={bounce:520,oil:760,life:180,over:150,spring:330,crumble:240,combo:990}[kind]||440;
     o.frequency.value=f; g.gain.value=0.035; o.start();
     g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime+0.12); o.stop(ac.currentTime+0.13);
   }catch(e){} }
@@ -1491,59 +1544,260 @@ if(!HEADLESS){
   }
 
   // ---- render ------------------------------------------------------------
-  let comboMsg='', comboT=0;
-  function draw(){
-    const want=s.bot.y - VIEW.h*0.58; camTop += (want-camTop)*0.25;
-    const toY=(wy)=>wy-camTop;
+  /* ===== THE ART — reworked 2026-10-18 (Founder: "improve BOTjumper bot graphics and gameplay - make
+     this best in class"). Pure render: nothing below writes `s`. The climb has WORLDS, a new one
+     every 100 ledges (the original's own cadence for a new tower theme), each with its own rock,
+     veins and ledge stone; ledges read by KIND (basalt, hover pad, crumbling plate, spring);
+     the lava breathes; Bot 2969 squashes on landing and stretches on the way up; and the combo
+     you are building is on screen with the clock that will close it. Sprites are pixel maps,
+     run-length encoded and merged down rows, drawn as rects snapped to the backing store. ===== */
+  const INK='#140f1c';
+  let comboMsg='', comboT=0, rt=0, squashT=0, springT=0, wakeT=0, wasAwake=false, popT=0, popMsg='';
+  const fxs=[]; const brokeAt=new Map();
+  function mkSprite(rows, pal){
+    const runs=[], w=rows[0].length; let open={};
+    for(let y=0;y<rows.length;y++){ const r=rows[y], next={}; let x=0;
+      while(x<w){ const ch=r.charAt(x); if(ch==='.'){ x++; continue; }
+        const x0=x; while(x<w && r.charAt(x)===ch) x++;
+        const key=x0+','+(x-x0)+','+ch, prev=open[key];
+        if(prev){ prev[4]++; next[key]=prev; } else { const run=[x0,y,x-x0,ch,1]; runs.push(run); next[key]=run; } }
+      open=next; }
+    return { w, h:rows.length, runs, pal };
+  }
+  const snap=v=>Math.round(v*SS)/SS;
+  function blit(spr,x,y,dw,dh,pal){
+    const sx=dw/spr.w, sy=dh/spr.h, P=pal||spr.pal;
+    for(const r of spr.runs){ const x0=snap(x+r[0]*sx), x1=snap(x+(r[0]+r[2])*sx), y0=snap(y+r[1]*sy), y1=snap(y+(r[1]+r[4])*sy);
+      ctx.fillStyle=P[r[3]]; ctx.fillRect(x0,y0,x1-x0,y1-y0); }
+  }
+  const CAN=mkSprite([ '...KKK....', '...KsK....', '.KKKKKKKK.', 'KllllllllK', 'KppppWpppK', 'KpppWWWppK',
+                       'KppWWWWWpK', 'KppWWWWWpK', 'KpppWWWppK', 'KppppppppK', 'KPPPPPPPPK', '.KKKKKKKK.' ],
+    { K:INK, s:'#c3cbdb', l:'#ffb3d6', p:'#e8559a', W:'#fff0f7', P:'#a33a6c' });
+  const COIL=mkSprite([ 'KKKKKKKKKKKKKK', 'KyyyyyyyyyyyyK', 'KKKKKKKKKKKKKK', '..KggggggggK..', '.KGGGGGGGGGGK.',
+                        '..KggggggggK..', '.KGGGGGGGGGGK.', '..KggggggggK..', 'KKKKKKKKKKKKKK' ],
+    { K:INK, y:'#ffd23f', g:'#dfe5ee', G:'#8b93a8' });
+  /* a world every 100 ledges — all original FinnBots places */
+  const WORLDS=[
+    { name:'MAGMA CORE',    top:'#2a0b0a', bot:'#571a0f', rock:'#3a1a14', rockL:'#5a2c20', vein:'#ff6a2a', slab:'#4b3a38', slabTop:'#8a706a', crack:'#ff8a3a' },
+    { name:'CRYSTAL VENTS', top:'#150c2c', bot:'#3a1a52', rock:'#2a1c40', rockL:'#463066', vein:'#c58cff', slab:'#3e3560', slabTop:'#8a7cc4', crack:'#e0b0ff' },
+    { name:'STEAM STACKS',  top:'#081f2a', bot:'#1c4a55', rock:'#143440', rockL:'#285a66', vein:'#6fd8c2', slab:'#38545e', slabTop:'#93bcc4', crack:'#a6ffe8' },
+    { name:'STARFALL',      top:'#04051a', bot:'#151a40', rock:'#13173a', rockL:'#262e5c', vein:'#ffd23f', slab:'#3a3f5e', slabTop:'#a0acd0', crack:'#ffe680' } ];
+  const worldOf=lv=>WORLDS[Math.min(WORLDS.length-1, Math.max(0, Math.floor(lv/100)))];
+  const ledgeAt=wy=>(COURSE.startY-wy)/COURSE.vGap;
+  const hash=n=>{ n=(n|0)*2654435761>>>0; n^=n>>>15; n=Math.imul(n,2246822519)>>>0; n^=n>>>13; return (n>>>0)/4294967296; };
+  function mixHex(a,b,t){ const A=parseInt(a.slice(1),16), B=parseInt(b.slice(1),16);
+    const c=sh=>Math.round(((A>>sh)&255)+(((B>>sh)&255)-((A>>sh)&255))*t);
+    return '#'+((1<<24)|(c(16)<<16)|(c(8)<<8)|c(0)).toString(16).slice(1); }
 
-    ctx.fillStyle='#20150f'; ctx.fillRect(0,0,VIEW.w,VIEW.h);
-    ctx.fillStyle='#2b1d15'; ctx.fillRect(0,0,8,VIEW.h); ctx.fillRect(VIEW.w-8,0,8,VIEW.h);
+  /* render-side effects, fed by the sim's own events (never written back) */
+  function fx(ev){
+    if(ev.bounce){ squashT=90; }
+    if(ev.land && !reduce){ const n=ev.land.spring?14:5;
+      for(let k=0;k<n;k++) fxs.push({ x:ev.land.x+(Math.random()-0.5)*18, y:ev.land.y, vx:(Math.random()-0.5)*(ev.land.spring?220:90),
+        vy:-Math.random()*(ev.land.spring?260:70), t:0, life:ev.land.spring?520:320, c:ev.land.spring?'#ffd23f':'rgba(230,220,210,.8)' }); }
+    if(ev.spring){ springT=700; }
+    if(ev.combo){ comboMsg='COMBO '+ev.combo; popMsg='+'+(ev.combo*ev.combo); comboT=1400; popT=1400; }
+  }
 
-    // platforms + oil cans
-    for(let i=Math.max(0,s.height-3); i<=s.genIdx; i++){ const g=s.plats[i]; if(!g) continue;
-      const y=toY(g.y); if(y<-24||y>VIEW.h+24) continue;
-      ctx.fillStyle='#5a4636'; ctx.fillRect(g.x,y,g.w,11);
-      ctx.fillStyle='#6f5844'; ctx.fillRect(g.x,y,g.w,3);
-      if(g.oil && !g.got){ const ox=g.x+g.w/2;
-        ctx.fillStyle=CFG.danger; ctx.fillRect(ox-9,y-20,18,18);
-        ctx.fillStyle='#3e2a10'; ctx.fillRect(ox-6,y-16,12,4); }
+  function drawBackdrop(){
+    const lv=ledgeAt(camTop+VIEW.h*0.5), w=Math.max(0,Math.floor(lv/100)), f=Math.min(1,Math.max(0,(lv%100-90)/10));
+    const A=worldOf(lv), B=worldOf(lv+100);
+    const top=f>0?mixHex(A.top,B.top,f):A.top, bot=f>0?mixHex(A.bot,B.bot,f):A.bot;
+    const g=ctx.createLinearGradient(0,0,0,VIEW.h); g.addColorStop(0,top); g.addColorStop(1,bot);
+    ctx.fillStyle=g; ctx.fillRect(0,0,VIEW.w,VIEW.h);
+    if(w>=3){ for(let i=0;i<60;i++){ const sx=hash(i*7+1)*VIEW.w, sy=((hash(i*13+5)*VIEW.h*3) - camTop*0.15)%VIEW.h;
+      ctx.fillStyle=hash(i)>0.7?'rgba(255,255,255,.75)':'rgba(255,255,255,.3)'; ctx.fillRect(sx,(sy+VIEW.h)%VIEW.h,1,1); } }
+    /* far rock columns, half-speed parallax */
+    const par=camTop*0.5;
+    for(let k=Math.floor(par/90)-1;k<Math.floor((par+VIEW.h)/90)+1;k++){
+      const y=k*90-par, h1=hash(k*3+11); if(y+122<0||y>VIEW.h) continue;
+      ctx.fillStyle=mixHex(A.rock, top, 0.45);
+      ctx.fillRect(20+h1*60, y, 18+hash(k*5)*20, 92); ctx.fillRect(VIEW.w-70-hash(k*7)*60, y+30, 16+hash(k*9)*22, 92);
     }
-
-    if(!reduce) for(const p of s.parts){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle=CFG.danger; ctx.fillRect(p.x-2,toY(p.y)-2,4,4); }
+    /* the side walls: rock blocks with glowing veins, full-speed so they read as the shaft */
+    for(let k=Math.floor(camTop/16)-1;k<Math.floor((camTop+VIEW.h)/16)+1;k++){
+      const y=k*16-camTop, lvk=ledgeAt(k*16), W=worldOf(lvk); if(y+16<=0||y>=VIEW.h) continue;
+      for(const side of [0,1]){ const x=side?VIEW.w-12:0, hv=hash(k*2+side);
+        ctx.fillStyle=hv>0.5?W.rock:W.rockL; ctx.fillRect(x,y,12,16);
+        ctx.fillStyle=INK; ctx.fillRect(side?x:x+11,y,1,16); ctx.fillRect(x,y+15,12,1);
+        if(hv>0.82){ ctx.fillStyle=W.vein; ctx.globalAlpha=0.55+0.35*Math.sin(rt/400+k); ctx.fillRect(x+3,y+5,6,2); ctx.fillRect(x+6,y+7,2,5); ctx.globalAlpha=1; } }
+    }
+    /* embers drifting up the shaft */
+    if(!reduce) for(let i=0;i<34;i++){ const sp=18+hash(i*31)*40, x=14+hash(i*17)*(VIEW.w-28)+Math.sin(rt/700+i)*6;
+      const y=VIEW.h-((rt/1000*sp + hash(i*23)*VIEW.h*2) % (VIEW.h+30));
+      ctx.fillStyle=hash(i*3)>0.5?'rgba(255,150,60,.55)':'rgba(255,210,120,.35)'; ctx.fillRect(x,y,hash(i)>0.8?2:1,hash(i)>0.8?2:1); }
+  }
+  /* every 25th ledge carries a height plate; every 100th announces the next world */
+  function drawMarkers(){
+    const lo=Math.floor(ledgeAt(camTop+VIEW.h))-1, hi=Math.ceil(ledgeAt(camTop))+1;
+    for(let L=Math.ceil(Math.max(0,lo)/25)*25; L<=hi; L+=25){
+      const y=COURSE.startY-L*COURSE.vGap-camTop;
+      if(L%100===0){ const W=worldOf(L);
+        ctx.fillStyle='rgba(0,0,0,.28)'; ctx.fillRect(12,y-48,VIEW.w-24,22);
+        ctx.fillStyle=W.vein; ctx.font='14px "Jersey 15", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(L+' · '+W.name, VIEW.w/2, y-37); ctx.textAlign='left'; }
+      ctx.fillStyle=INK; ctx.fillRect(13,y-16,24,12); ctx.fillStyle='#e8dcc8'; ctx.fillRect(14,y-15,22,10);
+      ctx.fillStyle=INK; ctx.font='9px "Jersey 15", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String(L), 25, y-10); ctx.textAlign='left';
+    }
+  }
+  function drawLedge(g, y){
+    const W=worldOf(g.i), x=g.x, w=g.w;
+    for(const ox of [0,-VIEW.w,VIEW.w]){ const X=x+ox; if(X+w<0||X>VIEW.w) continue;
+      if(g.kind==='move'){
+        /* thrusters flicker in COLOUR, never in size — a mark that changes shape every few frames
+           reads as strobing (verify-render's flicker measure caught the first version) */
+        const fl=reduce?0:((rt>>6)&1);
+        ctx.fillStyle=fl?'rgba(140,215,255,.65)':'rgba(90,170,255,.45)'; ctx.fillRect(X+10,y+11,6,5); ctx.fillRect(X+w-16,y+11,6,5);
+        ctx.fillStyle=INK; ctx.fillRect(X,y-1,w,12);
+        ctx.fillStyle='#7f8aa3'; ctx.fillRect(X+1,y,w-2,10); ctx.fillStyle='#c9d2e3'; ctx.fillRect(X+1,y,w-2,2);
+        ctx.fillStyle='#39c6ff'; ctx.fillRect(X+6,y+5,w-12,2);
+        for(let i=0;i<4;i++){ ctx.fillStyle=(i&1)?INK:'#f2c230'; ctx.fillRect(X+1+i*3,y+2,3,8); ctx.fillRect(X+w-13+i*3,y+2,3,8); }
+      } else if(g.kind==='crumble'){
+        ctx.fillStyle=INK; ctx.fillRect(X,y-1,w,12);
+        ctx.fillStyle='#8a4a22'; ctx.fillRect(X+1,y,w-2,10); ctx.fillStyle='#c27a3a'; ctx.fillRect(X+1,y,w-2,2);
+        ctx.fillStyle=INK; ctx.fillRect(X+18,y,1,6); ctx.fillRect(X+19,y+5,1,5); ctx.fillRect(X+44,y+2,1,8); ctx.fillRect(X+45,y,1,3); ctx.fillRect(X+62,y+4,1,6);
+        ctx.fillStyle='#5a2e14'; ctx.fillRect(X+6,y+6,4,2); ctx.fillRect(X+30,y+4,5,2); ctx.fillRect(X+52,y+7,4,2);
+      } else {
+        /* a rock slab: rounded ends, a crusted top, glowing cracks, drips underneath — each one
+           shaped from its own index so no two ledges are the same */
+        const dark=mixHex(W.slab,INK,0.4), deep=g.i===0?44:0;
+        ctx.fillStyle=W.vein; ctx.globalAlpha=0.16; ctx.fillRect(X+4,y+12,w-8,5); ctx.globalAlpha=1;
+        for(let d=0;d<3;d++){ const dx=X+8+Math.floor(hash(g.i*7+d)*(w-20)), dl=3+Math.floor(hash(g.i*11+d)*5);
+          const hl=Math.ceil(dl/2);   /* tapered: 4 wide, then 2, then a 1px tip */
+          ctx.fillStyle=INK; ctx.fillRect(dx-1,y+10,6,hl+1); ctx.fillRect(dx,y+10+hl,4,dl-hl+1); ctx.fillRect(dx+1,y+11+dl,2,1);
+          ctx.fillStyle=dark; ctx.fillRect(dx,y+10,4,hl); ctx.fillRect(dx+1,y+10+hl,2,dl-hl); }
+        ctx.fillStyle=INK; ctx.fillRect(X+2,y-1,w-4,1); ctx.fillRect(X,y,w,11+deep); ctx.fillRect(X+2,y+11+deep,w-4,1);
+        ctx.fillStyle=W.slab; ctx.fillRect(X+1,y+1,w-2,9+deep); ctx.fillRect(X+2,y,w-4,1);
+        ctx.fillStyle=W.slabTop; ctx.fillRect(X+2,y,w-4,2); ctx.fillRect(X+1,y+2,w-2,1);
+        for(let k=0;k<5;k++){ const kx=X+4+Math.floor(hash(g.i*13+k)*(w-10)); ctx.fillStyle=k&1?'#fff1e0':dark; ctx.fillRect(kx,y+(k&1?0:3),2,1); }
+        ctx.fillStyle=dark; ctx.fillRect(X+1,y+8+deep,w-2,2);
+        const c0=X+6+Math.floor(hash(g.i*3)*(w-30));
+        ctx.fillStyle=W.crack; ctx.globalAlpha=0.65+0.35*Math.sin(rt/450+g.i);
+        ctx.fillRect(c0,y+5,7,1); ctx.fillRect(c0+7,y+6,1,2); ctx.fillRect(c0+8,y+7,6,1); ctx.fillRect(c0+14,y+5,1,2);
+        if(deep){ for(let k=0;k<6;k++){ const vx=X+20+k*55; ctx.fillRect(vx,y+18+(k%3)*8,12,1); ctx.fillRect(vx+11,y+19+(k%3)*8,1,5); } }
+        ctx.globalAlpha=1;
+      }
+      if(g.spring){ const pressed=springT>560, ch=pressed?7:12;
+        ctx.fillStyle='rgba(255,210,63,'+(0.18+0.12*Math.sin(rt/180))+')'; ctx.beginPath(); ctx.arc(X+w/2, y-6, 15, 0, Math.PI*2); ctx.fill();
+        blit(COIL, X+w/2-9, y-ch, 18, ch); }
+    }
+  }
+  /* a crumbled plate falls away in two halves */
+  function drawRubble(g, y, age){
+    const fall=age*age*0.0006, a=Math.max(0,1-age/700);
+    ctx.globalAlpha=a; ctx.fillStyle='#8a4a22';
+    ctx.fillRect(g.x+2-age*0.02, y+fall, g.w/2-4, 8); ctx.fillRect(g.x+g.w/2+2+age*0.02, y+fall*1.2, g.w/2-4, 8);
     ctx.globalAlpha=1;
-
-    // bot = Bot 2969 (with a wrap ghost when crossing an edge)
-    const b=s.bot, bx=b.x, by=toY(b.y), BW=COURSE.botW, BH=COURSE.botH;
-    function drawBot(px){ if(heroOK){ ctx.save();
-        if(b.face<0){ ctx.translate(px+BW,by); ctx.scale(-1,1); ctx.drawImage(hero,0,0,BW,BH); }
-        else ctx.drawImage(hero,px,by,BW,BH); ctx.restore();
-      }else{ ctx.fillStyle=CFG.accent; ctx.fillRect(px,by,BW,BH);
-        ctx.fillStyle='#fff'; ctx.font='10px "Jersey 15", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('2969', px+BW/2, by+BH/2); } }
-    drawBot(bx);
-    if(bx<0) drawBot(bx+VIEW.w); else if(bx+BW>VIEW.w) drawBot(bx-VIEW.w);
-
-    // lava
-    const ly=toY(s.lavaY);
-    if(ly<VIEW.h){
-      const grd=ctx.createLinearGradient(0,ly,0,VIEW.h);
-      grd.addColorStop(0,'#ffb347'); grd.addColorStop(0.3,CFG.danger); grd.addColorStop(1,'#c23b12');
-      ctx.fillStyle=grd; ctx.fillRect(0,ly,VIEW.w,VIEW.h-ly);
-      ctx.fillStyle='rgba(255,220,150,.55)'; ctx.fillRect(0,ly,VIEW.w,3);
+  }
+  function drawLava(){
+    const ly=s.lavaY-camTop;
+    if(ly>=VIEW.h+10) return false;
+    const glow=ctx.createLinearGradient(0,ly-90,0,ly);
+    glow.addColorStop(0,'rgba(255,90,30,0)'); glow.addColorStop(1,'rgba(255,110,40,.35)');
+    ctx.fillStyle=glow; ctx.fillRect(0,ly-90,VIEW.w,90);
+    const grd=ctx.createLinearGradient(0,ly,0,VIEW.h);
+    grd.addColorStop(0,'#ffcf5a'); grd.addColorStop(0.18,'#ff8a2a'); grd.addColorStop(1,'#a3200e');
+    ctx.fillStyle=grd;
+    ctx.beginPath(); ctx.moveTo(0,VIEW.h+2);
+    for(let x=0;x<=VIEW.w;x+=12) ctx.lineTo(x, ly+Math.sin(x/28+rt/260)*3+Math.sin(x/11-rt/170)*1.5);
+    ctx.lineTo(VIEW.w,VIEW.h+2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='rgba(120,20,10,.45)';
+    for(let i=0;i<9;i++){ const x=(hash(i*5)*VIEW.w+rt*0.01*(i%3+1))%VIEW.w; ctx.fillRect(x, ly+14+hash(i)*30, 14+hash(i*7)*16, 3); }
+    if(!reduce) for(let i=0;i<6;i++){ const ph=((rt/900)+hash(i*9))%1, x=hash(i*29)*VIEW.w;
+      ctx.fillStyle='rgba(255,230,150,'+(0.8*(1-ph))+')'; ctx.beginPath(); ctx.arc(x, ly-ph*14, 2+ph*2, 0, Math.PI*2); ctx.fill(); }
+    return true;
+  }
+  /* Bot 2969: the real art, smoothed (a 512px source at 26px needs it), squashed on landing and
+     stretched on the way up, with an exhaust trail after a spring */
+  function drawBot(px, by){
+    const b=s.bot, BW=COURSE.botW, BH=COURSE.botH;
+    let sx=1, sy=1;
+    if(squashT>0 && !reduce){ const k=squashT/90; sx=1+0.22*k; sy=1-0.22*k; }
+    else if(b.vy<-500 && !reduce){ sx=0.93; sy=1.09; }
+    const cx=px+BW/2, feet=by+BH, dw=BW*sx, dh=BH*sy;
+    if(springT>0 && b.vy<-300 && !reduce){ for(let k=0;k<4;k++){ ctx.fillStyle=k&1?'#ffd23f':'#ff8a2a';
+      ctx.globalAlpha=0.7-k*0.15; ctx.fillRect(cx-4+(k&1)*2, feet+2+k*6, 8-(k&1)*4, 6); } ctx.globalAlpha=1; }
+    if(s.comboFloors>0){ ctx.fillStyle='rgba(255,210,63,.18)'; ctx.beginPath(); ctx.arc(cx, by+BH/2, 22, 0, Math.PI*2); ctx.fill(); }
+    if(heroOK){ ctx.save(); ctx.imageSmoothingEnabled=true; try{ ctx.imageSmoothingQuality='high'; }catch(e){}
+      if(b.face<0){ ctx.translate(cx+dw/2,feet-dh); ctx.scale(-1,1); ctx.drawImage(hero,0,0,dw,dh); }
+      else ctx.drawImage(hero,cx-dw/2,feet-dh,dw,dh);
+      ctx.restore();
+    } else { ctx.fillStyle=CFG.accent; ctx.fillRect(cx-dw/2,feet-dh,dw,dh); }
+  }
+  function drawFx(){
+    for(let i=fxs.length-1;i>=0;i--){ const p=fxs[i]; p.t+=16; if(p.t>=p.life){ fxs.splice(i,1); continue; }
+      p.x+=p.vx*0.016; p.y+=p.vy*0.016; p.vy+=380*0.016;
+      ctx.globalAlpha=1-p.t/p.life; ctx.fillStyle=p.c; ctx.fillRect(p.x-1.5,p.y-camTop-1.5,3,3); }
+    ctx.globalAlpha=1;
+  }
+  /* the HUD the canvas owns: the OIL gauge, the combo being built and its closing clock */
+  function drawGauge(){
+    const low=s.meter<0.33, blink=low && !reduce && ((rt>>8)&1);
+    ctx.fillStyle='rgba(10,6,14,.6)'; ctx.fillRect(16,10,112,16);
+    blit(CAN, 19, 12, 9, 11);
+    ctx.fillStyle=INK; ctx.fillRect(32,14,92,8);
+    for(let i=0;i<10;i++){ const on=s.meter>i/10+0.001;
+      ctx.fillStyle=on?(low?(blink?'#ff5a5a':'#ff8a2a'):'#f07cc0'):'#3a2a36'; ctx.fillRect(33+i*9,15,8,6); }
+    ctx.fillStyle='rgba(255,255,255,.55)'; ctx.font='8px "Jersey 15", monospace'; ctx.textBaseline='top';
+    ctx.fillText(low?'GRAB $OIL!':'BOUNCE', 33, 26);
+  }
+  function drawCombo(){
+    const left=Math.max(0,1-s.comboT/COMBO.timeoutMs);
+    /* top-RIGHT, out of the way of the ledges you are aiming for */
+    const R=VIEW.w-16;
+    ctx.fillStyle='rgba(10,6,14,.6)'; ctx.fillRect(R-92,10,92,30);
+    ctx.textAlign='right'; ctx.textBaseline='middle';
+    ctx.fillStyle='#ffd23f'; ctx.font='18px "Jersey 15", monospace';
+    ctx.fillText('COMBO '+s.comboFloors, R-4, 22);
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(R-86,32,80,4);
+    ctx.fillStyle=left<0.3?'#ff5a5a':'#ffd23f'; ctx.fillRect(R-86,32,80*left,4);
+    ctx.textAlign='left';
+  }
+  function drawBanner(msg, sub, a, col){
+    ctx.save(); ctx.globalAlpha=a; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,VIEW.h*0.3-24,VIEW.w,sub?60:44);
+    ctx.fillStyle=col; ctx.font='26px "Jersey 15", monospace'; ctx.fillText(msg, VIEW.w/2, VIEW.h*0.3-2);
+    if(sub){ ctx.fillStyle='#fff3d6'; ctx.font='16px "Jersey 15", monospace'; ctx.fillText(sub, VIEW.w/2, VIEW.h*0.3+22); }
+    ctx.restore();
+  }
+  function draw(){
+    /* a RATCHET camera: it rises with a new height and only follows DOWN when the bot is actually
+       falling out of view. It used to ease toward the bot every frame, so the whole world slid
+       ~130 px up and down on every bounce and the screen edges popped (verify-render: 2.3% flicker). */
+    const want=s.bot.y - VIEW.h*0.58;
+    if(want<camTop) camTop += (want-camTop)*0.25;
+    else if(s.bot.y-camTop > VIEW.h*0.80) camTop += (s.bot.y-VIEW.h*0.80-camTop)*0.25;
+    const toY=(wy)=>wy-camTop;
+    if(s.lavaAwake && !wasAwake){ wakeT=1600; } wasAwake=s.lavaAwake;
+    drawBackdrop();
+    drawMarkers();
+    for(let i=Math.max(0,s.height-6); i<=s.genIdx; i++){ const g=s.plats[i]; if(!g) continue;
+      const y=toY(g.y); if(y+30<0||y-24>VIEW.h) continue;   /* draw only what overlaps the view */
+      if(g.broken){ if(!brokeAt.has(g)) brokeAt.set(g,rt); const age=rt-brokeAt.get(g); if(age<700) drawRubble(g,y,age); continue; }
+      drawLedge(g,y);
+      if(g.oil && !g.got){ const bob=reduce?0:Math.round(Math.sin(rt/300+g.i)*2); blit(CAN, g.x+g.w/2-7, y-20+bob, 14, 17); }
     }
-
-    // combo banner (the endless tower-jump original: a completed >=4-floor combo pays floors^2)
-    if(comboT>0){
-      ctx.save(); ctx.globalAlpha=Math.min(1,comboT/400);
-      ctx.fillStyle='#ffd27f'; ctx.font='20px "Jersey 15", monospace';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(comboMsg, VIEW.w/2, VIEW.h*0.28); ctx.restore();
-    }
-
-    // agility bar (top-left)
-    ctx.fillStyle='rgba(255,255,255,.2)'; ctx.fillRect(12,12,90,6);
-    ctx.fillStyle=s.meter>0.33?CFG.accent:CFG.danger; ctx.fillRect(12,12,90*s.meter,6);
-
+    if(!reduce) for(const p of s.parts){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle='#f07cc0'; ctx.fillRect(p.x-2,toY(p.y)-2,4,4); }
+    ctx.globalAlpha=1;
+    if(fxs.length) drawFx();
+    const b=s.bot, bx=b.x, by=toY(b.y), BW=COURSE.botW;
+    drawBot(bx, by);
+    if(bx<0) drawBot(bx+VIEW.w, by); else if(bx+BW>VIEW.w) drawBot(bx-VIEW.w, by);
+    const lavaOn=drawLava();
+    /* the lava is below the screen but coming: the bottom edge glows hotter as it closes in */
+    const below=s.lavaY-camTop-VIEW.h;
+    if(s.lavaAwake && below>0 && below<420){ const hg=ctx.createLinearGradient(0,VIEW.h-60,0,VIEW.h);
+      hg.addColorStop(0,'rgba(255,90,30,0)'); hg.addColorStop(1,'rgba(255,110,40,'+(0.55*(1-below/420))+')');
+      ctx.fillStyle=hg; ctx.fillRect(0,VIEW.h-60,VIEW.w,60); }
+    /* danger: the lava is close */
+    const gap=s.lavaY-(b.y+COURSE.botH);
+    if(lavaOn && gap<200 && !reduce){ ctx.fillStyle='rgba(255,40,20,'+((1-gap/200)*(0.25+0.15*Math.sin(rt/90)))+')';
+      ctx.fillRect(0,VIEW.h-140,VIEW.w,140); }
+    drawGauge();
+    if(s.comboFloors>0) drawCombo();
+    if(comboT>0) drawBanner(comboMsg+'!', popMsg, Math.min(1,comboT/400), '#ffd23f');
+    else if(wakeT>0) drawBanner('LAVA RISING!', 'climb!', Math.min(1,wakeT/400), '#ff8a2a');
     if(flash>0 && !reduce){ ctx.fillStyle='rgba(242,160,61,'+(flash*0.5)+')'; ctx.fillRect(0,0,VIEW.w,VIEW.h); }
   }
 
@@ -1566,15 +1820,18 @@ if(!HEADLESS){
   // ---- loop --------------------------------------------------------------
   let last=performance.now(), acc=0; const FIXED=1000/120;
   function frame(now){
-      if(comboT>0) comboT-=16;
     let dt=now-last; last=now; if(dt>100)dt=100; acc+=dt;
+    rt+=dt; if(comboT>0) comboT-=dt; if(popT>0) popT-=dt;
+    squashT=Math.max(0,squashT-dt); springT=Math.max(0,springT-dt); wakeT=Math.max(0,wakeT-dt);
     if(active){
       while(acc>=FIXED){
         const deadBefore=(s.phase==='dead');
         const ev=stepJump(s, FIXED);
         if(ev.life||ev.over) flash=1;
-        if(ev.combo){ blip('oil'); comboMsg='COMBO '+ev.combo+'  +'+(ev.combo*ev.combo); comboT=1200; }
-        if(ev.oil) blip('oil'); else if(ev.bounce) blip('bounce');
+        fx(ev);
+        if(ev.combo) blip('combo');
+        if(ev.spring) blip('spring'); else if(ev.crumble) blip('crumble');
+        else if(ev.oil) blip('oil'); else if(ev.bounce) blip('bounce');
         acc-=FIXED;
         if(ev.over && !deadBefore){ blip('over'); endRun(); break; }
       }
