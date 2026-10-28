@@ -1227,7 +1227,7 @@ body:not(.mode-paid) .app .facts{ display:block !important; }
   <!-- Kid-safety confirm gate (shown BEFORE any wallet code runs) -->
   <div class="sheet" id="confirmSheet"><div class="panel">
     <h2>Play Bot Jumper — Paid</h2>
-    <p>One entry = one run (one life, no continues). It costs <b>25 OIL</b>, which is spent: it is not paid back and there is no prize. You're playing for a place on the leaderboard. If your wallet holds a FinnBot, your score counts ×1.5.<br/><br/>Needs a grown-up's crypto wallet. A <b>fun ranking</b>, not an official one.</p>
+    <p>One entry = one run (one life, no continues). It costs <b>25 OIL</b>, which is spent: it is not paid back and there is no prize. You're playing for a place on the leaderboard. Everyone is ranked on the same real score; if your wallet holds a FinnBot, you also get a Bot holders table of your own.<br/><br/>Needs a grown-up's crypto wallet. A <b>fun ranking</b>, not an official one.</p>
     <button class="again" id="confirmEnter" type="button">Connect &amp; Pay</button>
     <button class="ghostbtn" id="confirmBack" type="button">Cancel</button>
   </div></div>
@@ -1249,7 +1249,7 @@ body:not(.mode-paid) .app .facts{ display:block !important; }
    a full meter = a high bounce; let it drain and 2969 bounces short and the
    rising lava gains on him. Endless, but every run PROVABLY ends: the lava's
    rise ACCELERATES with height, so it always overtakes the climb — a better
-   player just reaches a higher line. Rank = score (holder x1.5); score is
+   player just reaches a higher line. Rank = score (the real score: R6 retired the holder x1.5); score is
    height-driven, so ranking by score == ranking by height. Tiebreak = oil.
    The engine references NO wallet/RPC/memo/money symbol. Same contract as the
    other sink games (window.BotJumperEngine {start,idle,resumeFree}); hands the
@@ -1315,7 +1315,7 @@ const OIL = { every:2 };
    now climbs ~2x further than before instead of dying at ledge 39. */
 const LAVA = { wakeLedge:5, wakeMs:8000, baseRise:16, accelPerLevel:0.45, knockbackLevels:6, leash:420 };
 
-/* ---- SCORE (higher = better; scanner applies holder x1.5 to `score`) ------ */
+/* ---- SCORE (higher = better; ranked as-is, R6 retired the holder x1.5) ------ */
 const SCORE = { heightPts:10, oilPts:15 };
 /* ---- COMBO (the endless tower-jump original rule): every landing that clears >=2 floors extends the
    combo; a 1-floor hop, a fall, or ~3s without a jump ends it. A COMPLETED combo
