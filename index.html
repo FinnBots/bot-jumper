@@ -1819,9 +1819,11 @@ if(!HEADLESS){
       ctx.restore();
     } else { ctx.fillStyle=CFG.accent; ctx.fillRect(cx-dw/2,feet-dh,dw,dh); }
   }
-  function drawFx(){
-    for(let i=fxs.length-1;i>=0;i--){ const p=fxs[i]; p.t+=16; if(p.t>=p.life){ fxs.splice(i,1); continue; }
-      p.x+=p.vx*0.016; p.y+=p.vy*0.016; p.vy+=380*0.016;
+  /* by elapsed time, like the camera (2026-11-18): it stepped a fixed 16 ms per DRAWN frame, so the dust kept
+     drifting behind the held Paid sheet and played twice as fast on a 120 Hz screen */
+  function drawFx(dt){ const ms=Math.max(0, dt||0), sec=ms/1000;
+    for(let i=fxs.length-1;i>=0;i--){ const p=fxs[i]; p.t+=ms; if(p.t>=p.life){ fxs.splice(i,1); continue; }
+      p.x+=p.vx*sec; p.y+=p.vy*sec; p.vy+=380*sec;
       ctx.globalAlpha=1-p.t/p.life; ctx.fillStyle=p.c; ctx.fillRect(p.x-1.5,p.y-camTop-1.5,3,3); }
     ctx.globalAlpha=1;
   }
@@ -1855,13 +1857,17 @@ if(!HEADLESS){
     if(sub){ ctx.fillStyle='#fff3d6'; ctx.font='16px "Jersey 15", monospace'; ctx.fillText(sub, VIEW.w/2, VIEW.h*0.3+22); }
     ctx.restore();
   }
-  function draw(){
+  function draw(dt){
     /* a RATCHET camera: it rises with a new height and only follows DOWN when the bot is actually
        falling out of view. It used to ease toward the bot every frame, so the whole world slid
        ~130 px up and down on every bounce and the screen edges popped (verify-render: 2.3% flicker). */
+    /* the ease is per elapsed TIME, not per drawn frame (2026-11-18): 25% per 60 Hz frame as before, so the feel is
+       unchanged — but a 120 Hz screen no longer chases twice as fast, and behind the Paid sheet (the clock held, dt 0)
+       the camera stands still with everything else instead of sliding to its target (check-pause, 2 of 3 runs). */
+    const ease=1-Math.pow(0.75, Math.max(0, dt||0)/(1000/60));
     const want=s.bot.y - VIEW.h*0.58;
-    if(want<camTop) camTop += (want-camTop)*0.25;
-    else if(s.bot.y-camTop > VIEW.h*0.80) camTop += (s.bot.y-VIEW.h*0.80-camTop)*0.25;
+    if(want<camTop) camTop += (want-camTop)*ease;
+    else if(s.bot.y-camTop > VIEW.h*0.80) camTop += (s.bot.y-VIEW.h*0.80-camTop)*ease;
     const toY=(wy)=>wy-camTop;
     if(s.lavaAwake && !wasAwake){ wakeT=1600; } wasAwake=s.lavaAwake;
     drawBackdrop();
@@ -1874,7 +1880,7 @@ if(!HEADLESS){
     }
     if(!reduce) for(const p of s.parts){ ctx.globalAlpha=Math.max(0,p.t*2); ctx.fillStyle='#f07cc0'; ctx.fillRect(p.x-2,toY(p.y)-2,4,4); }
     ctx.globalAlpha=1;
-    if(fxs.length) drawFx();
+    if(fxs.length) drawFx(dt);
     const b=s.bot, bx=b.x, by=toY(b.y), BW=COURSE.botW;
     drawBot(bx, by);
     if(bx<0) drawBot(bx+VIEW.w, by); else if(bx+BW>VIEW.w) drawBot(bx-VIEW.w, by);
@@ -1931,7 +1937,7 @@ if(!HEADLESS){
       }
     } else { acc=0; }
     if(flash>0) flash=Math.max(0,flash-dt/220);
-    syncHUD(); draw();
+    syncHUD(); draw(dt);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
